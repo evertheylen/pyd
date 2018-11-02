@@ -18,7 +18,7 @@ version = BucketHackery;
 
 import std.array;
 import std.range;
-import std.exception: enforce;
+import std.exception: enforce, assumeWontThrow;
 import std.algorithm: find, swap, copy, fill, max, startsWith, moveAll;
 import std.algorithm: move, sort, map;
 import std.traits: isImplicitlyConvertible, isDynamicArray;
@@ -28,6 +28,13 @@ import std.functional: unaryFun, binaryFun;
 import std.string: format;
 version(PtrHackery){
     import core.bitop: bt, bts, btr;
+}
+
+void print_debug(lazy string _msg, string func = __FUNCTION__, size_t line = __LINE__) nothrow {
+    // I also wanted to include __FUNCTION__ but it's 6 lines of template arguments
+    string msg = assumeWontThrow(_msg());
+    string short_func = func.split(".")[$-1];
+    assumeWontThrow(writeln(format("%s, line %d: %s", short_func, line, msg)));
 }
 
 // stopgap allocator implementation
@@ -192,16 +199,22 @@ bidirectional range
             void insertNext(typeof(this)* node) nothrow
                 in{
                     assert(node !is null);
+                    // NOTE: this crashes my program :(
                     assert(node.index!N.prev is null,
                             format("node.prev = %x",node.index!N.prev));
                     assert(node.index!N.next is null,
                             format("node.next = %x",node.index!N.next));
                 }body{
+                    print_debug(format("node.prev = %x", node.index!N.prev));
+                    if (cast(int)node.index!N.prev == 0xb0) {
+                        print_debug("BINGO! (assert would have crashed)");
+                    }
                     typeof(this)* n = next;
                     next = node;
                     node.index!N.prev = &this;
                     if(n !is null) n.index!N.prev = node;
                     node.index!N.next = n;
+                    print_debug(format("node.prev = %x", node.index!N.prev));
                 }
 
             // a,b = this, this.prev; then
@@ -215,11 +228,13 @@ bidirectional range
                     assert(node.index!N.next is null,
                             format("node.next = %x",node.index!N.next));
                 }body{
+                    print_debug(format("node.prev = %x", node.index!N.prev));
                     typeof(this)* p = prev;
                     if(p !is null) p.index!N.next = node;
                     node.index!N.prev = p;
                     prev = node;
                     node.index!N.next = &this;
+                    print_debug(format("node.prev = %x", node.index!N.prev));
                 }
 
             // a,b,c = this, this.next, this.next.next; then
@@ -233,6 +248,8 @@ bidirectional range
                     next = nn;
                     if(nn) nn.index!N.prev = &this;
                     n.index!N.prev = n.index!N.next = null;
+                    print_debug(format("n.index!N.prev = %x", n.index!N.prev));
+                    print_debug(format("n = %x", n));
                     return n;
                 }
 
@@ -247,6 +264,8 @@ bidirectional range
                     prev = pp;
                     if(pp) pp.index!N.next = &this;
                     p.index!N.prev = p.index!N.next = null;
+                    print_debug(format("p.index!N.prev = %x", p.index!N.prev));
+                    print_debug(format("p = %x", p));
                     return p;
                 }
         }
@@ -486,7 +505,9 @@ this index
                     size_t count = 0;
                     ThisNode* prev;
                     while(count == 0 && !stuff.empty){
+                        print_debug(format("prev = %x", prev));
                         prev = _InsertAllBut!N(stuff.front);
+                        print_debug(format("prev = %x", prev));
                         if (!prev) continue;
                         _insertFront(prev);
                         stuff.popFront();
@@ -496,7 +517,9 @@ this index
                         ThisNode* node = _InsertAllBut!N(item);
                         if (!node) continue;
                         prev.index!N.insertNext(node);
+                        print_debug(format("prev = %x", prev));
                         prev = node;
+                        print_debug(format("prev = %x", prev));
                         count ++;
                     }
                     return count;
@@ -632,8 +655,10 @@ Complexity: $(BIGOH n $(SUB r) * d(n)), $(BR) $(BIGOH n $(SUB r)) for this index
                   ThisNode* prev = old.index!N.prev;
                   newnode.index!N.next = next;
                   newnode.index!N.prev = prev;
+                  print_debug(format("set to %x", prev));
                   if(next) {
                       next.index!N.prev = newnode;
+                      print_debug(format("set to %x", newnode));
                   }else {
                       assert(old is _back);
                       _back = newnode;
@@ -3364,6 +3389,7 @@ template Hashed(bool allowDuplicates = false, alias KeyFromValue="a",
                 hashes[index] = n;
                 version(BucketHackery){
                     n.index!N.prev = cast(ThisNode*) index;
+                    print_debug(format("(BucketHackery) set to %x", n.index!N.prev));
                 }
             }
 
@@ -3378,8 +3404,10 @@ template Hashed(bool allowDuplicates = false, alias KeyFromValue="a",
                 if (nxt){
                     version(BucketHackery){
                         nxt.index!N.prev = cast(ThisNode*) index;
+                        print_debug(format("(BucketHackery) nxt.prev set to %x", nxt.index!N.prev));
                         n.index!N.next = null;
                         n.index!N.prev = null;
+                        print_debug(format("(BucketHackery) n.prev set to %x", n.index!N.prev));
                     }else{
                         nxt.index!N.removePrev();
                     }
@@ -3609,6 +3637,7 @@ $(BIGOH n) ($(BIGOH n 1) on a good day)
                 if(index != newindex){
                     ThisNode* cursor;
                     _Remove(node);
+                    print_debug(format("Just after _Remove, node is %x", node));
                     if(_find(key(node.value), cursor, newindex)){
                         static if(!allowDuplicates){
                             _RemoveAllBut!N(node);
@@ -3621,6 +3650,7 @@ $(BIGOH n) ($(BIGOH n 1) on a good day)
                             }
                         }
                     }else if(cursor){
+                        print_debug(format("Just befire insertNext, node is %x", node));
                         cursor.index!N.insertNext(node);
                     }else{
                         setFirst(node, index);
@@ -3708,10 +3738,13 @@ $(BIGOH n) ($(BIGOH n $(SUB result)) on a good day)
 
             void _Remove(ThisNode* n){
                 if(isFirst(n)){
+                    print_debug(format("isFirst(n) is true, n = %x", n));
                     removeFirst(n);
                 }else{
+                    print_debug(format("isFirst(n) is false, n = %x", n));
                     n.index!N.prev.index!N.removeNext();
                 }
+                print_debug(format("end of func, n.index!N.prev = %x", n.index!N.prev));
             }
 
             @property loadFactor() const{
@@ -3764,6 +3797,7 @@ $(BIGOH n) ($(BIGOH n $(SUB result)) on a good day)
                     }
                     version(BucketHackery){
                         node.index!N.prev = cast(ThisNode*)index;
+                        print_debug(format("(BucketHackery -- the culprit) set to %x", node.index!N.prev));
                     }else{
                         node.index!N.prev = null;
                     }
@@ -3963,8 +3997,10 @@ $(BIGOH n + n $(SUB k)) for this index ($(BIGOH n $(SUB k)) on a good day)
                   ThisNode* prev = old.index!N.prev;
                   newnode.index!N.next = next;
                   newnode.index!N.prev = prev;
+                  print_debug(format("set to %x", prev));
                   if(next) {
                       next.index!N.prev = newnode;
+                      print_debug(format("set to %x", newnode));
                   }
                   if(prev) {
                       prev.index!N.next = newnode;
